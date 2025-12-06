@@ -80,196 +80,142 @@ export class ExchangeService {
 }
 ```
 
-Теперь перейдем к контроллеру. В файле `src/stocks/stocks.controller.ts` добавим обработчик POST-метода:
-- принимает запрос с полем `pk`
+В NestJS для обработки запросов используются контроллеры. В файле `src/exchange/exchange.controller.ts` добавим обработчик POST-метода, который:
+- принимает запрос
 - получает результат "расчётов" из сервиса
-- отправляет PUT-запрос к основному серверу (синхронно ожидая результат)
+- отправляет PUT-запрос к основному серверу
 
-```typescript
-import { Controller, Post, Body, Res, HttpStatus } from '@nestjs/common';
-import { StocksService } from './stocks.service';
-import { Response } from 'express';
+```
+import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
+import { ExchangeService } from './exchange.service';
 
-@Controller('stocks') // Этот контроллер будет отвечать по пути /stocks
-export class StocksController {
-  constructor(private readonly stocksService: StocksService) {}
+@Controller('api/exchange_async')
+export class ExchangeController {
+  constructor(private readonly exchangeService: ExchangeService) {}
 
   @Post()
-  async setStatus(@Body() body: any, @Res() res: Response) {
-    if (body.pk) {
-      const id = body.pk;
-      const stat = this.stocksService.getRandomStatus();
-      
-      try {
-        // Ждем выполнения запроса к внешнему серверу (синхронное поведение)
-        await this.stocksService.sendStatus(id, stat);
-        return res.status(HttpStatus.OK).send();
-      } catch (e) {
-        return res.status(HttpStatus.BAD_REQUEST).send();
-      }
+  async submitRequest(@Body() body: any) {
+    if (!body.request_id || !body.exchange_rate || !body.bills) {
+      throw new BadRequestException('Invalid payload');
     }
-    return res.status(HttpStatus.BAD_REQUEST).send();
+
+    await this.exchangeService.sendExchangeResult(body);
+
+    return { status: 'ok' };
   }
 }
-```
 
-Запустим приложение, введя в терминале: `npm run start:dev`.
+```
 
 ## Асинхронный веб-сервер
 
-Может так случиться, что дополнительный веб-сервер выполняет расчёты слишком долго. Это можно сымитировать с помощью `setTimeout` (аналог `time.sleep`).
+Может так случиться, что дополнительный веб-сервер выполняет расчёты слишком долго. В Nest.js имитацию длительной операции можно реализовать с помощью `setTimeout`, обернув его в `Promise`.
 
-Изменим `src/stocks/stocks.service.ts`. Добавим имитацию долгой работы. В Node.js нет блокирующего `sleep`, поэтому мы используем Promise с таймером. Также объединим расчет и отправку в одну задачу.
+Изменим файл `src/stocks/stocks.service.ts` и добавим задержку в 5–10 секунд перед отправкой результата:
 
 ```typescript
-import { Injectable } from '@nestjs/common';
-import axios from 'axios';
+async sendExchangeResult(data: RequestData) {
+  const delay = Math.random() * 5000 + 5000;
+  await new Promise(resolve => setTimeout(resolve, delay));
 
-@Injectable()
-export class StocksService {
-  private readonly CALLBACK_URL = 'http://127.0.0.1:8000/stocks/';
 
-  // Долгая задача (аналог get_random_status с sleep)
-  async calculateAndSend(pk: number) {
-    console.log(`Start calculation for ${pk}...`);
-    
-    // Имитация time.sleep(5)
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-
-    const result = {
-      id: pk,
-      status: Math.random() < 0.5,
-    };
-
-    // Вызываем "колбэк" - отправку данных
-    await this.statusCallback(result);
-  }
-
-  // Аналог status_callback
-  private async statusCallback(result: { id: number; status: boolean }) {
-    console.log('Calculation finished:', result);
-    
-    const nurl = `${this.CALLBACK_URL}${result.id}/put/`;
-    const answer = { is_growing: result.status };
-    
-    try {
-      await axios.put(nurl, answer, { timeout: 3000 });
-      console.log('Callback sent successfully');
-    } catch (e) {
-      console.error('Error sending callback');
-    }
-  }
+  await axios.put(this.MAIN_SERVICE_URL, {
+    token: this.SECRET_TOKEN,
+    request_id: data.request_id,
+    breakdown: calculateBillValues(data.bills, data.exchange_rate),
+  });
 }
 ```
 
-В таком случае, если бы мы использовали `await` в контроллере, основной сервер завис бы в ожидании на 5 секунд.
+В таком случае, если бы мы использовали `await` в контроллере, основной сервер завис бы в ожидании на 5-10 секунд.
 Мы хотим, чтобы сервер быстро отвечал на запрос (200 OK), а долгая задача запускалась "в фоновом режиме".
 
-В Python для этого использовался `ThreadPoolExecutor`. В Node.js/NestJS архитектура уже асинхронная (Event Loop). Чтобы запустить задачу в фоне, достаточно просто **вызвать асинхронный метод сервиса, НЕ используя ключевое слово await**.
+В NestJS архитектура уже асинхронная (Event Loop). Чтобы запустить задачу в фоне, достаточно просто **вызвать асинхронный метод сервиса, НЕ используя ключевое слово await**.
 
 Обновим `src/stocks/stocks.controller.ts`:
 
 ```typescript
-import { Controller, Post, Body, Res, HttpStatus } from '@nestjs/common';
-import { StocksService } from './stocks.service';
-import { Response } from 'express';
+import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
+import { ExchangeService } from './exchange.service';
 
-@Controller('stocks')
-export class StocksController {
-  constructor(private readonly stocksService: StocksService) {}
+@Controller('api/exchange_async')
+export class ExchangeController {
+  constructor(private readonly exchangeService: ExchangeService) {}
 
   @Post()
-  setStatus(@Body() body: any, @Res() res: Response) {
-    if (body.pk) {
-      const id = body.pk;
-
-      // ЗАПУСК В ФОНОВОМ РЕЖИМЕ:
-      // Мы вызываем метод, но НЕ пишем перед ним await.
-      // Код пойдет дальше мгновенно, а метод продолжит выполняться в фоне.
-      this.stocksService.calculateAndSend(id);
-
-      // Мгновенно возвращаем 200 OK
-      return res.status(HttpStatus.OK).send();
+  async submitRequest(@Body() body: any) {
+    if (!body.request_id || !body.exchange_rate || !body.bills) {
+      throw new BadRequestException('Invalid payload');
     }
-    return res.status(HttpStatus.BAD_REQUEST).send();
+
+    this.exchangeService.sendExchangeResult(body);
+
+    return { status: 'ok' };
   }
 }
 ```
 
-Теперь наш обработчик POST-запроса запустит задачу `calculateAndSend` и тут же продолжит выполнение (отправит ответ 200 OK основному серверу). А спустя 5 секунд сработает логика внутри сервиса и отправит PUT-запрос.
+Теперь наш обработчик POST-запроса запустит задачу `sendExchangeResult` и тут же продолжит выполнение (отправит ответ 200 OK основному серверу). А спустя 5-10 секунд сработает логика внутри сервиса и отправит PUT-запрос.
 
 ### Полный код файлов для проверки
 
-**src/stocks/stocks.service.ts**:
+**src/exchange/exchange.service.ts**:
 ```typescript
 import { Injectable } from '@nestjs/common';
 import axios from 'axios';
 
+export interface Bill { denomination_id: number; denomination: number; count: number; }
+export interface RequestData { request_id: string; exchange_rate: number; bills: Bill[]; }
+
+export function calculateBillValues(bills: Bill[], rate: number) {
+  return bills.map((b) => ({
+    denomination_id: b.denomination_id,
+    subtotal_rub: b.denomination * b.count * rate,
+  }));
+}
+
 @Injectable()
-export class StocksService {
-  private readonly CALLBACK_URL = 'http://127.0.0.1:8000/stocks/';
+export class ExchangeService {
+  private readonly MAIN_SERVICE_URL = 'http://localhost:3001/api/exchange_result';
+  private readonly SECRET_TOKEN = 'MY_SECRET_TOKEN'; // Ваш токен
 
-  async calculateAndSend(pk: number) {
-    // Имитация задержки 5 секунд
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+  async sendExchangeResult(data: RequestData) {
+    const delay = Math.random() * 5000 + 5000;
+    await new Promise(resolve => setTimeout(resolve, delay));
 
-    const result = {
-      id: pk,
-      status: Math.random() < 0.5,
-    };
 
-    // Отправка результата
-    const nurl = `${this.CALLBACK_URL}${result.id}/put/`;
-    const answer = { is_growing: result.status };
-    
-    try {
-      await axios.put(nurl, answer, { timeout: 3000 });
-      console.log(`Success update for id ${pk}: ${result.status}`);
-    } catch (e) {
-      console.error(`Error updating id ${pk}`);
-    }
+    await axios.put(this.MAIN_SERVICE_URL, {
+      token: this.SECRET_TOKEN,
+      request_id: data.request_id,
+      breakdown: calculateBillValues(data.bills, data.exchange_rate),
+    });
   }
 }
 ```
 
-**src/stocks/stocks.controller.ts**:
+**src/exchange/exchange.controller.ts**:
 ```typescript
-import { Controller, Post, Body, Res, HttpStatus } from '@nestjs/common';
-import { StocksService } from './stocks.service';
-import { Response } from 'express';
+import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
+import { ExchangeService } from './exchange.service';
 
-@Controller('stocks')
-export class StocksController {
-  constructor(private readonly stocksService: StocksService) {}
+@Controller('api/exchange_async')
+export class ExchangeController {
+  constructor(private readonly exchangeService: ExchangeService) {}
 
   @Post()
-  setStatus(@Body() body: any, @Res() res: Response) {
-    if (body && body.pk) {
-      // Fire-and-forget (запуск без ожидания)
-      this.stocksService.calculateAndSend(body.pk);
-      
-      return res.status(HttpStatus.OK).send();
+  async submitRequest(@Body() body: any) {
+    if (!body.request_id || !body.exchange_rate || !body.bills) {
+      throw new BadRequestException('Invalid payload');
     }
-    return res.status(HttpStatus.BAD_REQUEST).send();
+
+    this.exchangeService.sendExchangeResult(body);
+
+    return { status: 'ok' };
   }
 }
 ```
 
 ## Тестирование
 
-Проверим работу асинхронного сервера. 
-
-1. Убедитесь, что ваш основной сервер Django (на порту 8000) запущен.
-2. Запустите NestJS сервер: `npm run start:dev` (он запустится на порту 3001).
-3. Отправляем запрос на NestJS.
-   
-   Пример через curl:
-   ```bash
-   curl -X POST http://localhost:3001/stocks \
-     -H "Content-Type: application/json" \
-     -d '{"pk": 1}'
-   ```
-   
-   Вам **мгновенно** придет ответ со статусом 200 OK.
-
-4. Спустя примерно 5 секунд в терминале NestJS появится сообщение об успешной отправке, а данные на основном сервере (Django) обновятся.
+Проверим работу асинхронного сервера. Отправляем последовательно пару запросов, и нам спустя несколько миллисекунд приходят ответы со статусом 200. 
+Спустя примерно 5-10 секунд данные на основном сервере из предыдущих лабораторных обновляются. 
