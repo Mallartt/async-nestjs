@@ -66,7 +66,7 @@ export function calculateBillValues(bills: Bill[], rate: number) {
 @Injectable()
 export class ExchangeService {
   private readonly MAIN_SERVICE_URL = 'http://localhost:3001/api/exchange_result';
-  private readonly SECRET_TOKEN = 'MY_SECRET_TOKEN'; \\ Ваш токен
+  private readonly SECRET_TOKEN = 'MY_SECRET_TOKEN'; // Ваш токен
 
   async sendExchangeResult(data: RequestData) {
     const billvalues = calculateBillValues(data.bills, data.exchange_rate);
