@@ -132,26 +132,38 @@ async sendExchangeResult(data: RequestData) {
 
 В NestJS архитектура уже асинхронная (Event Loop). Чтобы запустить задачу в фоне, достаточно просто **вызвать асинхронный метод сервиса, НЕ используя ключевое слово await**.
 
-Обновим `src/stocks/stocks.controller.ts`:
+Обновим в `src/stocks/stocks.controller.ts`:
 
 ```typescript
-import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
-import { ExchangeService } from './exchange.service';
-
-@Controller('api/exchange_async')
-export class ExchangeController {
-  constructor(private readonly exchangeService: ExchangeService) {}
-
-  @Post()
-  async submitRequest(@Body() body: any) {
-    if (!body.request_id || !body.exchange_rate || !body.bills) {
-      throw new BadRequestException('Invalid payload');
-    }
-
-    this.exchangeService.sendExchangeResult(body);
-
-    return { status: 'ok' };
+@Post()
+async submitRequest(@Body() body: any) {
+  if (!body.request_id || !body.exchange_rate || !body.bills) {
+    throw new BadRequestException('Invalid payload');
   }
+
+  this.exchangeService.sendExchangeResult(body);
+
+  return { status: 'ok' };
+}
+```
+
+Также в NestJS по умолчанию возвращает 201 Created для POST-запросов, поэтому явно укажем, чтобы возвращалось 200 OK для этого используем HttpCode не забыв импортировать его
+
+Обновим в `src/stocks/stocks.controller.ts`:
+
+```typescript
+import { Controller, Post, Body, BadRequestException, HttpCode } from '@nestjs/common';
+
+@Post()
+@HttpCode(200)
+async submitRequest(@Body() body: any) {
+  if (!body.request_id || !body.exchange_rate || !body.bills) {
+    throw new BadRequestException('Invalid payload');
+  }
+
+  this.exchangeService.sendExchangeResult(body);
+
+  return { status: 'ok' };
 }
 ```
 
