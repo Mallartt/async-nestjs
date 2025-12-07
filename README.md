@@ -130,7 +130,7 @@ async sendExchangeResult(data: RequestData) {
 В таком случае, если бы мы использовали `await` в контроллере, основной сервер завис бы в ожидании на 5-10 секунд.
 Мы хотим, чтобы сервер быстро отвечал на запрос (200 OK), а долгая задача запускалась "в фоновом режиме".
 
-В NestJS архитектура уже асинхронная (Event Loop). Чтобы запустить задачу в фоне, достаточно просто **вызвать асинхронный метод сервиса, НЕ используя ключевое слово await**.
+В NestJS архитектура уже асинхронная (Event Loop). Чтобы запустить задачу в фоне, достаточно просто **вызвать асинхронный метод сервиса без использования ключевого слова await**.
 
 Обновим в `src/stocks/stocks.controller.ts`:
 
@@ -147,7 +147,7 @@ async submitRequest(@Body() body: any) {
 }
 ```
 
-Также NestJS по умолчанию возвращает 201 Created для POST-запросов, поэтому явно укажем, чтобы возвращалось 200 OK для этого используем HttpCode не забыв импортировать его
+Также NestJS по умолчанию возвращает 201 Created для POST-запросов, поэтому явно укажем возврат 200 OK, используя @HttpCode(200) и не забывая импортировать его
 
 Обновим в `src/stocks/stocks.controller.ts`:
 
@@ -207,7 +207,7 @@ export class ExchangeService {
 
 **src/exchange/exchange.controller.ts**:
 ```typescript
-import { Controller, Post, Body, BadRequestException } from '@nestjs/common';
+import { Controller, Post, Body, BadRequestException, HttpCode } from '@nestjs/common';
 import { ExchangeService } from './exchange.service';
 
 @Controller('api/exchange_async')
@@ -215,6 +215,7 @@ export class ExchangeController {
   constructor(private readonly exchangeService: ExchangeService) {}
 
   @Post()
+  @HttpCode(200)
   async submitRequest(@Body() body: any) {
     if (!body.request_id || !body.exchange_rate || !body.bills) {
       throw new BadRequestException('Invalid payload');
