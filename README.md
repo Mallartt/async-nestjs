@@ -36,7 +36,7 @@ bootstrap();
 
 В NestJS бизнес-логика (расчеты) размещается в **Service**, а обработка входящих запросов — в **Controller**.
 
-В примере мы будем случайно менять числовое поле `subtotal_rub` валюта после обмена. Функция для "расчётов" `calculateBillValues`:
+В примере мы будем рассчитывать числовое поле `subtotal_rub` валюту после обмена. Функция для "расчётов" `calculateBillValues`:
 
 ```typescript
 export function calculateBillValues(bills: Bill[], rate: number) {
